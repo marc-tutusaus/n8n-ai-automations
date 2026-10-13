@@ -1,0 +1,10 @@
+{
+  "ticket_id": 1042,
+  "customer_id": 318,
+  "technician_id": 7,
+  "billed_minutes": 45,
+  "maintenance_type": 1,
+  "service_id": 3,
+  "issue": "",
+  "resolution": "SMTP relay credentials renewed and order confirmation emails re-sent."
+}

@@ -1,0 +1,429 @@
+{
+  "name": "Ticket auto-invoicing (helpdesk → billing API → note + state)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ticket-invoice",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook: invoice ticket",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1424,
+        320
+      ],
+      "id": "94177346-df2b-4332-8102-b099ea618366",
+      "webhookId": "1945dcb1-e4c9-43d9-b344-d31b00ced128"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Build the billing payload directly from the helpdesk webhook body.\n * Expected fields:\n *   ticket_id, customer_id, technician_id, billed_minutes,\n *   maintenance_type, service_id, issue, resolution\n */\nconst incomingRoot = $node['Webhook: invoice ticket'].json;\nconst incoming = incomingRoot.body ?? incomingRoot;\n\nreturn [{\n  json: {\n    ticket_id: Number(incoming.ticket_id),\n    customer_id: Number(incoming.customer_id),\n    technician_id: Number(incoming.technician_id),\n    billed_minutes: Math.round(Number(incoming.billed_minutes ?? 0)),\n    maintenance_type: Number(incoming.maintenance_type ?? 1),\n    service_id: Number(incoming.service_id ?? 1),\n    issue: String(incoming.issue ?? ''),\n    resolution: String(incoming.resolution ?? '')\n  }\n}];\n"
+      },
+      "name": "Build payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1152,
+        320
+      ],
+      "id": "48680e64-3efb-4e04-a62b-256feb3bbc26"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ZAMMAD_BASE_URL + '/api/v1/ticket_articles/by_ticket/' + $json.ticket_id }}\n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "name": "Zammad: get ticket articles",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        -848,
+        320
+      ],
+      "id": "571c4a49-eb25-4a76-9601-7ea6f80ed437",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Zammad API token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Pick the text that goes on the delivery note:\n * - the FIRST article (by created_at) written by an agent (sender_id === 2 in Zammad)\n * - fallback: the first article with a non-empty body\n */\nconst base = $node['Build payload'].json ?? {};\n\n// n8n may return the array as one item or split it into many items\nlet articles = items[0]?.json;\nif (typeof articles === 'string') {\n  try { articles = JSON.parse(articles); } catch (e) { articles = []; }\n}\nif (!Array.isArray(articles)) articles = items.map(i => i.json);\nif (!Array.isArray(articles)) articles = [];\n\nconst sorted = articles.slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));\nconst hasBody = a => a && typeof a.body === 'string' && a.body.trim() !== '';\n\nconst chosen = sorted.find(a => hasBody(a) && Number(a.sender_id) === 2) ?? sorted.find(hasBody) ?? null;\n\nreturn [{\n  json: {\n    ...base,\n    firstNoteBody: chosen?.body ? String(chosen.body).trim() : '',\n    chosen_article_id: chosen?.id ?? null\n  }\n}];\n"
+      },
+      "name": "Extract first agent note",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -608,
+        336
+      ],
+      "id": "6630bcb9-fb9f-443d-9458-b83fe2801dff"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Validate the minimum fields required by the billing API and build its payload.\n * If something is missing, prepare an internal note instead of failing silently.\n */\nconst p = items[0]?.json ?? {};\n\nconst required = ['ticket_id', 'customer_id', 'technician_id', 'billed_minutes', 'maintenance_type', 'service_id'];\nconst missing = required.filter(k => p[k] === undefined || p[k] === null || p[k] === '' || Number.isNaN(Number(p[k])));\nconst canInvoice = missing.length === 0;\n\n// The first agent note is the best description of the work done\nconst issue = p.firstNoteBody || p.issue || '';\n\nconst deliveryNotePayload = canInvoice ? {\n  customer_id: Number(p.customer_id),\n  technician_id: Number(p.technician_id),\n  billed_minutes: Number(p.billed_minutes),\n  maintenance_type: Number(p.maintenance_type),\n  service_id: Number(p.service_id),\n  issue: String(issue),\n  resolution: String(p.resolution || ''),\n} : null;\n\nconst noteBodyMissing =\n  `AUTOMATIC INVOICING (n8n)\\n` +\n  `The delivery note could not be created.\\n` +\n  `Missing fields: ${missing.join(', ')}\\n`;\n\nreturn [{\n  json: {\n    ticket_id: p.ticket_id ? Number(p.ticket_id) : null,\n    canInvoice,\n    missing,\n    deliveryNotePayload,\n    noteBodyMissing\n  }\n}];\n"
+      },
+      "name": "Validate + prepare delivery note",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        48
+      ],
+      "id": "3a102499-c803-4de0-95c1-512d5ec785b2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "161b017f-afcd-4430-b0af-23824232946b",
+              "leftValue": "",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has required fields?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -304,
+        368
+      ],
+      "id": "f5159673-d019-4635-a1ff-ac571f3f994b"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BILLING_API_URL }}/delivery-notes",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.deliveryNotePayload }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "name": "Billing API: create delivery note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        -64,
+        176
+      ],
+      "id": "8cb72488-3b2c-449c-8d41-cc98d2a7930f"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build a success / error note from the billing API response\nconst ticket_id = $node['Validate + prepare delivery note'].json.ticket_id;\nconst res = items[0].json ?? {};\nconst status = res.status ?? 'unknown';\n\nconst noteBody = (status === 'ok' && res.number)\n  ? `AUTOMATIC INVOICING (n8n)\\nDelivery note created.\\nNumber: ${res.number}\\n` + (res.url ? `Link: ${res.url}\\n` : '')\n  : `AUTOMATIC INVOICING (n8n)\\nError creating the delivery note.\\nStatus: ${status}\\n` + (res.message ? `Message: ${res.message}\\n` : '');\n\nreturn [{ json: { ticket_id, status, number: res.number ?? null, url: res.url ?? null, noteBody } }];\n"
+      },
+      "name": "Build result note",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        176
+      ],
+      "id": "d4371c07-f57f-4158-939e-8a7add14f3e4"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/ticket_articles",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  ticket_id: $json.ticket_id,\n  subject: 'Automatic invoicing',\n  body: $json.noteBody,\n  content_type: 'text/plain',\n  type: 'note',\n  internal: true,\n  sender: 'System'\n} }}",
+        "options": {
+          "timeout": 300000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "name": "Zammad: add result note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        320,
+        176
+      ],
+      "id": "25c9bc17-0237-4f94-a3e4-370d3c93f1bb",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Zammad API token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/tickets/{{ $json.ticket_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"state_id\": 4\n}\n",
+        "options": {
+          "timeout": 300000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "name": "Zammad: set pending close",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        528,
+        176
+      ],
+      "id": "74ac487f-abbe-4af1-bafd-7244815e3374",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Zammad API token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        736,
+        544
+      ],
+      "id": "888bec38-e10c-4118-ba15-d36315b5b1a5"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/ticket_articles",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  ticket_id: $json.ticket_id,\n  subject: 'Automatic invoicing',\n  body: $json.noteBodyMissing,\n  content_type: 'text/plain',\n  type: 'note',\n  internal: true,\n  sender: 'System'\n} }}",
+        "options": {
+          "timeout": 300000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "name": "Zammad: add missing-fields note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        -32,
+        480
+      ],
+      "id": "c6e67071-5f1c-4185-8ea8-3933e5c3f509",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Zammad API token"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook: invoice ticket": {
+      "main": [
+        [
+          {
+            "node": "Build payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build payload": {
+      "main": [
+        [
+          {
+            "node": "Zammad: get ticket articles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zammad: get ticket articles": {
+      "main": [
+        [
+          {
+            "node": "Extract first agent note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract first agent note": {
+      "main": [
+        [
+          {
+            "node": "Validate + prepare delivery note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate + prepare delivery note": {
+      "main": [
+        [
+          {
+            "node": "Has required fields?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has required fields?": {
+      "main": [
+        [
+          {
+            "node": "Billing API: create delivery note",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Zammad: add missing-fields note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Billing API: create delivery note": {
+      "main": [
+        [
+          {
+            "node": "Build result note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build result note": {
+      "main": [
+        [
+          {
+            "node": "Zammad: add result note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zammad: add result note": {
+      "main": [
+        [
+          {
+            "node": "Zammad: set pending close",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zammad: set pending close": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zammad: add missing-fields note": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {}
+}
