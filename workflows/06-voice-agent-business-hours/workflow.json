@@ -1,0 +1,81 @@
+{
+  "name": "Voice agent business hours (Retell dynamic variables, holidays, DST)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "voice-agent-business-hours",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "e12bded7-f7a0-428e-a075-6de86c9cbe68",
+      "name": "Webhook: Retell inbound call",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "3d4e4162-9fe4-475a-a512-bad9efa068ea"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Hora actual en España (Europe/Madrid, gestiona horario de verano/invierno)\nconst now = new Date();\nconst parts = Object.fromEntries(\n  new Intl.DateTimeFormat('en-GB', {\n    timeZone: 'Europe/Madrid',\n    year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', weekday: 'short', hour12: false\n  }).formatToParts(now).map(p => [p.type, p.value])\n);\n\nconst hour = parseInt(parts.hour, 10) % 24;\nconst minute = parseInt(parts.minute, 10);\nconst weekdayMap = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };\nconst weekday = weekdayMap[parts.weekday];\nconst diasEs = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];\n\n// ===== FESTIVOS (formato MM-DD) - editar aquí =====\nconst FESTIVOS_FIJOS = {\n  '01-01': 'Año Nuevo',\n  '01-06': 'Reyes',\n  '05-01': 'Día del Trabajo',\n  '08-15': 'Asunción',\n  '09-08': 'Festivo local',\n  '09-11': 'Diada de Catalunya',\n  '10-12': 'Fiesta Nacional',\n  '11-01': 'Todos los Santos',\n  '11-29': 'Festivo local',\n  '12-06': 'Constitución',\n  '12-08': 'Inmaculada',\n  '12-25': 'Navidad'\n};\n// Festivos puntuales de un año concreto (formato YYYY-MM-DD), ej: '2027-03-19': 'Traslado'\nconst FESTIVOS_EXTRA = {};\n\n// Viernes Santo (móvil, calculado a partir de Pascua)\nfunction viernesSanto(y) {\n  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;\n  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);\n  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;\n  const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);\n  const mes = Math.floor((h + l - 7 * m + 114) / 31), dia = ((h + l - 7 * m + 114) % 31) + 1;\n  const vs = new Date(Date.UTC(y, mes - 1, dia - 2));\n  return `${String(vs.getUTCMonth() + 1).padStart(2, '0')}-${String(vs.getUTCDate()).padStart(2, '0')}`;\n}\n\nconst year = parseInt(parts.year, 10);\nconst mmdd = `${parts.month}-${parts.day}`;\nconst festivo = FESTIVOS_EXTRA[`${year}-${mmdd}`] || FESTIVOS_FIJOS[mmdd] || (mmdd === viernesSanto(year) ? 'Viernes Santo' : null);\n\n// Laborable: lunes a viernes de 08:00 a 12:59 (cierra a las 13:00), excepto festivos\nconst minutos = hour * 60 + minute;\nconst esLaborable = !festivo && weekday >= 1 && weekday <= 5 && minutos >= 8 * 60 && minutos < 13 * 60;\n\nconst fecha = `${parts.day}/${parts.month}/${parts.year}`;\nconst hora = `${String(hour).padStart(2, '0')}:${parts.minute}`;\n\nconst vars = {\n  horario_laboral: esLaborable ? 'si' : 'no',\n  es_festivo: festivo ? 'si' : 'no',\n  festivo: festivo || '',\n  fecha_actual: fecha,\n  hora_actual: hora,\n  dia_semana: diasEs[weekday]\n};\n\n// Formato válido tanto para el Inbound Call Webhook de Retell\n// (call_inbound.dynamic_variables) como para una Custom Function (campos raíz)\nreturn [{ json: { call_inbound: { dynamic_variables: vars }, ...vars } }];"
+      },
+      "id": "ab26d803-57d6-48d3-a330-5876b6a28613",
+      "name": "Compute business hours (Europe/Madrid)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "723a3398-e65a-4b06-9082-af1573146c46",
+      "name": "Respond dynamic variables",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: Retell inbound call": {
+      "main": [
+        [
+          {
+            "node": "Compute business hours (Europe/Madrid)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute business hours (Europe/Madrid)": {
+      "main": [
+        [
+          {
+            "node": "Respond dynamic variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {}
+}

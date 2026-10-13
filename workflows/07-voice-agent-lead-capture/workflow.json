@@ -1,0 +1,169 @@
+{
+  "name": "Voice agent lead capture (Retell call analysis → filters → HTML email)",
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.enviar }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "b804ebef-377c-44c5-ba1b-0424defadb73",
+      "name": "Send email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -1712,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "voice-agent-lead",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d8c0a8e3-5e03-4c08-9dc7-023d7bfc9e81",
+      "name": "Webhook: Retell call_analyzed",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -2192,
+        672
+      ],
+      "webhookId": "bbb96f39-5882-40fe-9f08-a2d6b317b5d6"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\n\n// FILTRO 1: solo call_analyzed\nif (body.event !== 'call_analyzed') {\n  return [{ json: { enviar: false, motivo_skip: 'Evento no es call_analyzed' } }];\n}\n\nconst call = body.call || {};\nconst analysis = call.call_analysis || {};\nconst extracted = analysis.custom_analysis_data || {};\n\n// FILTRO 2: duración mínima 45 segundos\nconst duracionMs  = call.duration_ms || 0;\nconst duracionSeg = Math.round(duracionMs / 1000);\nif (duracionSeg < 45) {\n  return [{ json: { enviar: false, motivo_skip: `Llamada demasiado corta: ${duracionSeg}s` } }];\n}\n\n// FILTRO 3: no es buzón de voz\nif (analysis.in_voicemail === true) {\n  return [{ json: { enviar: false, motivo_skip: 'Llamada fue a buzón de voz' } }];\n}\n\n// FILTRO 4: tiene al menos un dato útil\nconst nombre   = (extracted['Nombre del cliente'] || '').trim();\nconst contacto = (extracted['Teléfono o email']   || '').trim();\nconst motivo   = (extracted['Interés detectado']  || '').trim();\n\nconst tieneDatos = (\n  (nombre   !== '' && nombre   !== 'No indicado') ||\n  (contacto !== '' && contacto !== 'No indicado') ||\n  (motivo   !== '' && motivo   !== 'No indicado')\n);\n\nif (!tieneDatos) {\n  return [{ json: { enviar: false, motivo_skip: 'Sin datos útiles recogidos' } }];\n}\n\n// ✅ PASA TODOS LOS FILTROS\nconst empresa    = (extracted['Empresa']          || 'No indicada').trim();\nconst interes_ia = (extracted['Interés en IA']    || 'No indicado').trim();\nconst nivel      = (extracted['Nivel de interés'] || 'no determinado').trim().toLowerCase();\n\nconst telefono_llamada = call.from_number || 'No disponible';\n\nconst duracion = duracionSeg >= 60\n  ? `${Math.floor(duracionSeg/60)}m ${duracionSeg%60}s`\n  : `${duracionSeg}s`;\n\nconst fecha_hora    = new Date().toLocaleString('es-ES', { timeZone: 'Europe/Madrid' });\nconst resumen       = analysis.call_summary   || 'Sin resumen';\nconst sentimiento   = analysis.user_sentiment || 'No determinado';\nconst exitosa       = analysis.call_successful ? 'Sí' : 'No';\nconst transcripcion = (call.transcript || 'Sin transcripción')\n  .replace(/\\n?(Agent:)/g, '<br><b>🤖 Agent:</b>')\n  .replace(/\\n?(User:)/g, '<br><b>👤 User:</b>')\n  .replace(/^<br>/, '')\n  .replace(/\\n/g, ' ');\n\nconst nombreMostrar   = nombre   || 'No indicado';\nconst motivoMostrar   = motivo   || 'No indicado';\nconst contactoMostrar = contacto || 'No indicado';\n\nconst colorNivel = nivel === 'alto' ? '#27ae60' : nivel === 'medio' ? '#e67e22' : '#95a5a6';\n\nconst emojiNivel = nivel === 'alto' ? '🔴' : nivel === 'medio' ? '🟡' : '🟢';\nconst asunto = `${emojiNivel} Ticket | ${nombreMostrar} | ${empresa} | Interés: ${nivel}`;\n\nconst cuerpo = [\n  '<div style=\"font-family:Arial,sans-serif;max-width:620px;margin:0 auto\">',\n  '<h2 style=\"color:#1a1a2e;border-bottom:3px solid #3498db;padding-bottom:8px\">📞 Nuevo Lead Comercial</h2>',\n  '<p style=\"color:#555\">Contacto registrado a través del asistente de voz con IA.</p>',\n  `<div style=\"background:${colorNivel};color:white;padding:10px 16px;border-radius:6px;margin:16px 0;font-size:16px\"><b>🎯 Nivel de interés: ${nivel.toUpperCase()}</b></div>`,\n  '<h3 style=\"color:#2c3e50\">📋 Datos del contacto</h3>',\n  '<table style=\"font-size:15px;color:#333;border-collapse:collapse;width:100%\">',\n  `<tr style=\"border-bottom:1px solid #eee\"><td style=\"padding:8px 20px 8px 0;width:40%\"><b>👤 Nombre</b></td><td>${nombreMostrar}</td></tr>`,\n  `<tr style=\"border-bottom:1px solid #eee\"><td style=\"padding:8px 20px 8px 0\"><b>🏢 Empresa</b></td><td>${empresa}</td></tr>`,\n  `<tr style=\"border-bottom:1px solid #eee\"><td style=\"padding:8px 20px 8px 0\"><b>📱 Teléfono llamada</b></td><td>${telefono_llamada}</td></tr>`,\n  `<tr style=\"border-bottom:1px solid #eee\"><td style=\"padding:8px 20px 8px 0\"><b>📧 Contacto dado</b></td><td>${contactoMostrar}</td></tr>`,\n  `<tr style=\"border-bottom:1px solid #eee\"><td style=\"padding:8px 20px 8px 0\"><b>💬 Motivo</b></td><td>${motivoMostrar}</td></tr>`,\n  `<tr style=\"border-bottom:1px solid #eee\"><td style=\"padding:8px 20px 8px 0\"><b>🤖 Interés en IA</b></td><td>${interes_ia}</td></tr>`,\n  '</table>',\n  '<h3 style=\"color:#2c3e50;margin-top:20px\">📊 Datos de la llamada</h3>',\n  '<table style=\"font-size:15px;color:#333;border-collapse:collapse;width:100%\">',\n  `<tr style=\"border-bottom:1px solid #eee\"><td style=\"padding:8px 20px 8px 0;width:40%\"><b>😊 Sentimiento</b></td><td>${sentimiento}</td></tr>`,\n  `<tr style=\"border-bottom:1px solid #eee\"><td style=\"padding:8px 20px 8px 0\"><b>✅ Llamada exitosa</b></td><td>${exitosa}</td></tr>`,\n  `<tr style=\"border-bottom:1px solid #eee\"><td style=\"padding:8px 20px 8px 0\"><b>⏱ Duración</b></td><td>${duracion}</td></tr>`,\n  `<tr style=\"border-bottom:1px solid #eee\"><td style=\"padding:8px 20px 8px 0\"><b>🕐 Fecha/hora</b></td><td>${fecha_hora}</td></tr>`,\n  '</table>',\n  '<h3 style=\"color:#2c3e50;margin-top:20px\">📝 Resumen IA</h3>',\n  `<p style=\"color:#333;background:#f8f9fa;padding:12px;border-radius:6px;border-left:4px solid #3498db\">${resumen}</p>`,\n  '<h3 style=\"color:#2c3e50;margin-top:20px\">📄 Transcripción</h3>',\n  `<p style=\"color:#555;background:#f8f9fa;padding:12px;border-radius:6px;white-space:pre-line;font-size:13px\">${transcripcion}</p>`,\n  '<hr style=\"border:1px solid #eee;margin-top:20px\">',\n  '<p style=\"color:#e74c3c\"><b>⚡ Estado: PENDIENTE — Contactar a la brevedad.</b></p>',\n  `<p style=\"color:#aaa;font-size:12px\">AI Voice Agent · ${new Date().getFullYear()}</p>`,\n  '</div>'\n].join('');\n\nreturn [{ json: { enviar: true, asunto, cuerpo } }];"
+      },
+      "id": "1460090e-d7f6-4f70-9e4f-e9f5a4440361",
+      "name": "Filter + build lead email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1952,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ignored', motivo: $json.motivo_skip }) }}",
+        "options": {}
+      },
+      "id": "9d5f2821-1047-4865-8b07-54067a5aae27",
+      "name": "Respond: ignored",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -1472,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "voice-agent@example.com",
+        "toEmail": "sales@example.com",
+        "subject": "={{ $json.asunto }}",
+        "html": "={{ $json.cuerpo }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "cd811e85-5b90-476d-b65d-7b69d5e6c74c",
+      "name": "Email: new lead",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -1472,
+        512
+      ],
+      "webhookId": "26491358-5ff4-4742-83b3-92e593688495",
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": "SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok', message: 'Correo enviado correctamente' }) }}",
+        "options": {}
+      },
+      "id": "0fffe1b1-e85e-4dd8-87d9-2480a8ff8eb8",
+      "name": "Respond: ok",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -1232,
+        512
+      ]
+    }
+  ],
+  "connections": {
+    "Send email?": {
+      "main": [
+        [
+          {
+            "node": "Email: new lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: ignored",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Retell call_analyzed": {
+      "main": [
+        [
+          {
+            "node": "Filter + build lead email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter + build lead email": {
+      "main": [
+        [
+          {
+            "node": "Send email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email: new lead": {
+      "main": [
+        [
+          {
+            "node": "Respond: ok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {}
+}

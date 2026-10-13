@@ -1,0 +1,22 @@
+{
+  "event": "call_analyzed",
+  "call": {
+    "from_number": "+34600000000",
+    "duration_ms": 142000,
+    "transcript": "Agent: Hola, ¿en qué puedo ayudarte?\nUser: Quería información sobre automatizar la atención telefónica...",
+    "call_analysis": {
+      "call_summary": "The caller runs a small clinic and wants to automate appointment calls with AI. Asked for a quote.",
+      "user_sentiment": "Positive",
+      "call_successful": true,
+      "in_voicemail": false,
+      "custom_analysis_data": {
+        "Nombre del cliente": "Laura",
+        "Empresa": "Demo Clinic",
+        "Teléfono o email": "laura@example.com",
+        "Interés detectado": "Automatizar llamadas de citas",
+        "Interés en IA": "Agente de voz",
+        "Nivel de interés": "alto"
+      }
+    }
+  }
+}

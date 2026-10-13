@@ -1,0 +1,18 @@
+{
+  "call_inbound": {
+    "dynamic_variables": {
+      "horario_laboral": "si",
+      "es_festivo": "no",
+      "festivo": "",
+      "fecha_actual": "14/10/2026",
+      "hora_actual": "10:32",
+      "dia_semana": "miércoles"
+    }
+  },
+  "horario_laboral": "si",
+  "es_festivo": "no",
+  "festivo": "",
+  "fecha_actual": "14/10/2026",
+  "hora_actual": "10:32",
+  "dia_semana": "miércoles"
+}
