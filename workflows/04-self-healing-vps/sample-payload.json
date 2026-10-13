@@ -1,0 +1,7 @@
+{
+  "monitor_id": "MONITOR_ID_1",
+  "name": "Client website A",
+  "target": "https://example.com",
+  "is_ok": "0",
+  "incident_url": "https://uptime.example.com/incident/123"
+}

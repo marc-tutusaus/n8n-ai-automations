@@ -1,0 +1,870 @@
+{
+  "name": "Service watchdog (systemd health check → restart → verify → notify)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "77ad014d-8cec-490f-b33b-e8835e20509a",
+      "name": "Every 5 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -768,
+        160
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "e02aaf1a-2212-40b2-ae7d-ef951ab8cde5",
+      "name": "Manual test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -768,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "command": "SERVICES=\"\nzammad\nzammad-web\nzammad-web-1\nzammad-websocket\nzammad-websocket-1\nzammad-worker\nzammad-worker-1\n\"\n\nFAILED=\"\"\n\nfor SERVICE in $SERVICES\ndo\n  if ! systemctl is-active --quiet \"$SERVICE\"\n  then\n    FAILED=\"$FAILED $SERVICE\"\n  fi\ndone\n\nif [ -z \"$FAILED\" ]\nthen\n  echo \"RESULT=HEALTHY\"\nelse\n  echo \"RESULT=UNHEALTHY\"\n  echo \"FAILED_SERVICES=$FAILED\"\nfi\n\nexit 0"
+      },
+      "id": "5ea6ec52-17eb-447f-9e90-0e786903c9a7",
+      "name": "SSH: check services #1",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        -480,
+        224
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": "SSH server"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "33ab12c5-7520-4f75-9bdc-dfab22c3a09e",
+              "leftValue": "={{ $json.stdout }}",
+              "rightValue": "RESULT=HEALTHY",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5caa886c-dd0e-42e3-9eee-68c29c09803a",
+      "name": "Healthy? #1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -256,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 60
+      },
+      "id": "20579e95-d9a3-42c0-ad1e-dd011eb95b4e",
+      "name": "Wait 60s (attempt 2)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -48,
+        384
+      ],
+      "webhookId": "7bc45c0b-0fd1-4751-897c-6e293d2bc14b"
+    },
+    {
+      "parameters": {
+        "command": "SERVICES=\"\nzammad\nzammad-web\nzammad-web-1\nzammad-websocket\nzammad-websocket-1\nzammad-worker\nzammad-worker-1\n\"\n\nFAILED=\"\"\n\nfor SERVICE in $SERVICES\ndo\n  if ! systemctl is-active --quiet \"$SERVICE\"\n  then\n    FAILED=\"$FAILED $SERVICE\"\n  fi\ndone\n\nif [ -z \"$FAILED\" ]\nthen\n  echo \"RESULT=HEALTHY\"\nelse\n  echo \"RESULT=UNHEALTHY\"\n  echo \"FAILED_SERVICES=$FAILED\"\nfi\n\nexit 0"
+      },
+      "id": "17d41cad-f04e-4d08-bed0-310d9e80f2c0",
+      "name": "SSH: check services #2",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        0,
+        224
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": "SSH server"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3e285d13-9ca5-48f5-bd5b-515cc8025f19",
+              "leftValue": "={{ $json.stdout }}",
+              "rightValue": "RESULT=HEALTHY",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a8d4c26b-ba75-4c88-bb44-0a4e5d93c0c6",
+      "name": "Healthy? #2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        224,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 60
+      },
+      "id": "cc0b2195-3d82-46bf-be5e-8d052831dc1b",
+      "name": "Wait 60s (attempt 3)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        384
+      ],
+      "webhookId": "0acc92cc-38f9-4fcc-8504-3d1a3ece0836"
+    },
+    {
+      "parameters": {
+        "command": "SERVICES=\"\nzammad\nzammad-web\nzammad-web-1\nzammad-websocket\nzammad-websocket-1\nzammad-worker\nzammad-worker-1\n\"\n\nFAILED=\"\"\n\nfor SERVICE in $SERVICES\ndo\n  if ! systemctl is-active --quiet \"$SERVICE\"\n  then\n    FAILED=\"$FAILED $SERVICE\"\n  fi\ndone\n\nif [ -z \"$FAILED\" ]\nthen\n  echo \"RESULT=HEALTHY\"\nelse\n  echo \"RESULT=UNHEALTHY\"\n  echo \"FAILED_SERVICES=$FAILED\"\nfi\n\nexit 0"
+      },
+      "id": "cac9ad85-f8d1-4e06-9515-4d9ed92bc3f3",
+      "name": "SSH: check services #3",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        480,
+        224
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": "SSH server"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6ec937de-85b2-4e86-a219-37fb039decbb",
+              "leftValue": "={{ $json.stdout }}",
+              "rightValue": "RESULT=HEALTHY",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cbafd151-aaae-422b-9046-ae659fde9783",
+      "name": "Healthy? #3",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        704,
+        224
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "bb9f37a7-898a-49f8-81ec-1256e7ff59e7",
+      "name": "End: services healthy",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "command": "sudo systemctl restart zammad\nsleep 10\n\nSERVICES=\"\nzammad\nzammad-web\nzammad-web-1\nzammad-websocket\nzammad-websocket-1\nzammad-worker\nzammad-worker-1\n\"\n\nFAILED=\"\"\n\nfor SERVICE in $SERVICES\ndo\n  if ! systemctl is-active --quiet \"$SERVICE\"\n  then\n    FAILED=\"$FAILED $SERVICE\"\n  fi\ndone\n\nif [ -z \"$FAILED\" ]\nthen\n  echo \"RESTART_RESULT=HEALTHY\"\nelse\n  echo \"RESTART_RESULT=UNHEALTHY\"\n  echo \"FAILED_SERVICES=$FAILED\"\nfi\n\nexit 0"
+      },
+      "id": "5d31520c-3cd6-47e6-a87e-a9464cf05ea1",
+      "name": "SSH: restart services",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        960,
+        384
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": "SSH server"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 45
+      },
+      "id": "b67dcc32-a65c-4ba8-b035-1f1abd8293ef",
+      "name": "Wait 45s after restart",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1184,
+        384
+      ],
+      "webhookId": "a1514629-cfcc-45b6-82f4-4cc8cbc641a1"
+    },
+    {
+      "parameters": {
+        "command": "SERVICES=\"\nzammad\nzammad-web\nzammad-web-1\nzammad-websocket\nzammad-websocket-1\nzammad-worker\nzammad-worker-1\n\"\n\nFAILED=\"\"\n\nfor SERVICE in $SERVICES\ndo\n  if ! systemctl is-active --quiet \"$SERVICE\"\n  then\n    FAILED=\"$FAILED $SERVICE\"\n  fi\ndone\n\nif [ -z \"$FAILED\" ]\nthen\n  echo \"RESULT=HEALTHY\"\nelse\n  echo \"RESULT=UNHEALTHY\"\n  echo \"FAILED_SERVICES=$FAILED\"\nfi\n\nexit 0"
+      },
+      "id": "f9bc4239-f9bc-4e5c-9b80-1b7ee3eb3038",
+      "name": "SSH: verify recovery #1",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        1424,
+        384
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": "SSH server"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0ad9ff3a-67ef-4925-b34c-250f694d37f0",
+              "leftValue": "={{ $json.stdout }}",
+              "rightValue": "RESULT=HEALTHY",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ff21b5f7-b5a4-401e-82ca-538f084115a2",
+      "name": "Recovered? #1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1648,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "2bbf53e9-460d-435a-a25e-8ecfacc1d766",
+      "name": "Wait 30s (verify 2)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1872,
+        544
+      ],
+      "webhookId": "235b41eb-1f7f-4c5a-bcf2-8d83ac8250af"
+    },
+    {
+      "parameters": {
+        "command": "SERVICES=\"\nzammad\nzammad-web\nzammad-web-1\nzammad-websocket\nzammad-websocket-1\nzammad-worker\nzammad-worker-1\n\"\n\nFAILED=\"\"\n\nfor SERVICE in $SERVICES\ndo\n  if ! systemctl is-active --quiet \"$SERVICE\"\n  then\n    FAILED=\"$FAILED $SERVICE\"\n  fi\ndone\n\nif [ -z \"$FAILED\" ]\nthen\n  echo \"RESULT=HEALTHY\"\nelse\n  echo \"RESULT=UNHEALTHY\"\n  echo \"FAILED_SERVICES=$FAILED\"\nfi\n\nexit 0"
+      },
+      "id": "86021624-5080-49be-8c95-947c9ac0fc0e",
+      "name": "SSH: verify recovery #2",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        1904,
+        384
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": "SSH server"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2dd86161-993c-4243-8e13-4425e9707cfe",
+              "leftValue": "={{ $json.stdout }}",
+              "rightValue": "RESULT=HEALTHY",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4e412588-adb8-4b66-9359-9f706d707be5",
+      "name": "Recovered? #2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2128,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "c111ed33-5d63-4415-93ea-886d19d9c138",
+      "name": "Wait 30s (verify 3)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2352,
+        544
+      ],
+      "webhookId": "b7a65c9b-3120-4ae5-b756-8fef2df487b5"
+    },
+    {
+      "parameters": {
+        "command": "SERVICES=\"\nzammad\nzammad-web\nzammad-web-1\nzammad-websocket\nzammad-websocket-1\nzammad-worker\nzammad-worker-1\n\"\n\nFAILED=\"\"\n\nfor SERVICE in $SERVICES\ndo\n  if ! systemctl is-active --quiet \"$SERVICE\"\n  then\n    FAILED=\"$FAILED $SERVICE\"\n  fi\ndone\n\nif [ -z \"$FAILED\" ]\nthen\n  echo \"RESULT=HEALTHY\"\nelse\n  echo \"RESULT=UNHEALTHY\"\n  echo \"FAILED_SERVICES=$FAILED\"\nfi\n\nexit 0"
+      },
+      "id": "4a341e9b-02de-43b9-b322-b4a93528a723",
+      "name": "SSH: verify recovery #3",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        2384,
+        384
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": "SSH server"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5fabd5c4-b56a-484e-a821-64fa1dd9dd2d",
+              "leftValue": "={{ $json.stdout }}",
+              "rightValue": "RESULT=HEALTHY",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "13cf00a6-3036-4c9f-bc7b-a13df1c5c5fc",
+      "name": "Recovered? #3",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2608,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "b9767d75-375a-4bcf-b876-f6cbe9c787ac",
+      "name": "Wait 30s (verify 4)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2832,
+        544
+      ],
+      "webhookId": "15873623-39ed-4cdf-9fe9-359e93e10a01"
+    },
+    {
+      "parameters": {
+        "command": "SERVICES=\"\nzammad\nzammad-web\nzammad-web-1\nzammad-websocket\nzammad-websocket-1\nzammad-worker\nzammad-worker-1\n\"\n\nFAILED=\"\"\n\nfor SERVICE in $SERVICES\ndo\n  if ! systemctl is-active --quiet \"$SERVICE\"\n  then\n    FAILED=\"$FAILED $SERVICE\"\n  fi\ndone\n\nif [ -z \"$FAILED\" ]\nthen\n  echo \"RESULT=HEALTHY\"\nelse\n  echo \"RESULT=UNHEALTHY\"\n  echo \"FAILED_SERVICES=$FAILED\"\nfi\n\nexit 0"
+      },
+      "id": "4e2f4d5d-0b44-40ee-9feb-e420470edd6b",
+      "name": "SSH: verify recovery #4",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        2864,
+        384
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": "SSH server"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3fa33536-04d6-4a93-b13d-76bc27161300",
+              "leftValue": "={{ $json.stdout }}",
+              "rightValue": "RESULT=HEALTHY",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cbadb91c-822f-4343-911f-f8d1e2ef0e82",
+      "name": "Recovered? #4",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3088,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "monitoring@example.com",
+        "toEmail": "ops-team@example.com",
+        "subject": "✅ Helpdesk services recovered automatically",
+        "html": "The helpdesk services were down and recovered after an automatic restart.",
+        "options": {}
+      },
+      "id": "f8205ade-3674-442f-9101-d517c4f5acd5",
+      "name": "Email: recovered",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2384,
+        144
+      ],
+      "webhookId": "58d1af80-a109-456f-a23d-02e10630854d",
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": "SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "monitoring@example.com",
+        "toEmail": "ops-team@example.com",
+        "subject": "🚨 Helpdesk services still failing after automatic restart",
+        "html": "The helpdesk services are still failing after an automatic restart. Manual action required.",
+        "options": {}
+      },
+      "id": "d0b10cc2-2543-49f3-bb58-4463eff1e92c",
+      "name": "Email: still failing",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        3344,
+        544
+      ],
+      "webhookId": "7df830c0-768b-4c9f-a0a1-4e06e0264601",
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": "SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 5 minutes": {
+      "main": [
+        [
+          {
+            "node": "SSH: check services #1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual test": {
+      "main": [
+        [
+          {
+            "node": "SSH: check services #1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH: check services #1": {
+      "main": [
+        [
+          {
+            "node": "Healthy? #1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Healthy? #1": {
+      "main": [
+        [
+          {
+            "node": "End: services healthy",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 60s (attempt 2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 60s (attempt 2)": {
+      "main": [
+        [
+          {
+            "node": "SSH: check services #2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH: check services #2": {
+      "main": [
+        [
+          {
+            "node": "Healthy? #2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Healthy? #2": {
+      "main": [
+        [
+          {
+            "node": "End: services healthy",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 60s (attempt 3)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 60s (attempt 3)": {
+      "main": [
+        [
+          {
+            "node": "SSH: check services #3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH: check services #3": {
+      "main": [
+        [
+          {
+            "node": "Healthy? #3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Healthy? #3": {
+      "main": [
+        [
+          {
+            "node": "End: services healthy",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SSH: restart services",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH: restart services": {
+      "main": [
+        [
+          {
+            "node": "Wait 45s after restart",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 45s after restart": {
+      "main": [
+        [
+          {
+            "node": "SSH: verify recovery #1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH: verify recovery #1": {
+      "main": [
+        [
+          {
+            "node": "Recovered? #1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recovered? #1": {
+      "main": [
+        [
+          {
+            "node": "Email: recovered",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 30s (verify 2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s (verify 2)": {
+      "main": [
+        [
+          {
+            "node": "SSH: verify recovery #2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH: verify recovery #2": {
+      "main": [
+        [
+          {
+            "node": "Recovered? #2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recovered? #2": {
+      "main": [
+        [
+          {
+            "node": "Email: recovered",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 30s (verify 3)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s (verify 3)": {
+      "main": [
+        [
+          {
+            "node": "SSH: verify recovery #3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH: verify recovery #3": {
+      "main": [
+        [
+          {
+            "node": "Recovered? #3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recovered? #3": {
+      "main": [
+        [
+          {
+            "node": "Email: recovered",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 30s (verify 4)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s (verify 4)": {
+      "main": [
+        [
+          {
+            "node": "SSH: verify recovery #4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH: verify recovery #4": {
+      "main": [
+        [
+          {
+            "node": "Recovered? #4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recovered? #4": {
+      "main": [
+        [
+          {
+            "node": "Email: recovered",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email: still failing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {}
+}

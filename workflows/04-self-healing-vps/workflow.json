@@ -1,0 +1,802 @@
+{
+  "name": "Self-healing VPS (uptime alert → confirm → SSH reboot → verify → notify)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "uptime-alert",
+        "options": {}
+      },
+      "id": "0abcc3d7-30ef-4869-b621-46f2549d8997",
+      "name": "Webhook: uptime alert",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        2768
+      ],
+      "webhookId": "f39cdcc9-266b-405f-89e3-3d9b28ba127b"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-is-ok",
+              "leftValue": "={{ $json.body.is_ok }}",
+              "rightValue": "1",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0f270a2c-24cf-4519-8a84-8d7d3313e8ca",
+      "name": "Is OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2208,
+        2768
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ca68aa87-93d1-4a32-a406-17e74219cc7c",
+      "name": "Already recovered",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2416,
+        2656
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nreturn [{\n  json: {\n    checkUrl: body.target || body.url,\n    monitorName: body.name,\n    monitorId: body.monitor_id,\n    incidentUrl: body.incident_url,\n    attempt: 0,\n    maxAttempts: 5  }\n}];"
+      },
+      "id": "95db82b7-dde6-4bfe-b8f5-4bd42818fa2e",
+      "name": "Prepare confirmation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2416,
+        2848
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 60
+      },
+      "id": "fc41ea7e-0867-444f-9c27-fb272f4b706e",
+      "name": "Wait 60s (confirm)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        2848
+      ],
+      "webhookId": "3ed8f7e0-9b73-4702-878e-94ce9d3d20fa"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Prepare confirmation').first().json.checkUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "7e1755c3-d6c4-4045-8ac2-9174fc14a205",
+      "name": "Check if still down",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2864,
+        2848
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 400,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3d18ca79-cebe-4787-8129-1452f6f0ee46",
+      "name": "Back up?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3088,
+        2848
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "1e78bad1-face-41d4-b7b9-c9fd25fcc086",
+      "name": "End: recovered by itself",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3296,
+        2736
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Prepare confirmation').first().json;\nconst attempt = $runIndex + 1;\n\nreturn [{\n  json: {\n    ...base,\n    attempt\n  }\n}];"
+      },
+      "id": "95cc4d15-d028-485f-8ccf-551108577e7b",
+      "name": "Count confirmation attempt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3264,
+        2928
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.attempt }}",
+              "rightValue": "={{ $json.maxAttempts }}",
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4b9a7859-6d40-43d3-95e0-3333eda7ab1c",
+      "name": "Confirmation attempts left?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3408,
+        2944
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Prepare confirmation').first().json.monitorId }}",
+                    "rightValue": "MONITOR_ID_1",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "47acb2bf-94a6-4de4-9dbe-951fa0886e1c"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "server-01"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "e85a0fb7-1efe-43eb-9eba-8caa922359ad",
+                    "leftValue": "={{ $('Prepare confirmation').first().json.monitorId }}",
+                    "rightValue": "MONITOR_ID_2",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "server-02"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "3c25c5a3-3a9c-40fa-9da5-b0eaaef74792",
+                    "leftValue": "={{ $('Prepare confirmation').first().json.monitorId }}",
+                    "rightValue": "MONITOR_ID_3",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "server-03"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "1c045367-6e30-4c57-99b2-c92fc2a7693b",
+      "name": "Which server?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        3584,
+        2768
+      ],
+      "notes": "One rule per monitored website: monitor_id → SSH credential of the server that hosts it. Unknown monitors go to the fallback output."
+    },
+    {
+      "parameters": {
+        "command": "sudo reboot"
+      },
+      "id": "2605d3f3-1638-4639-8b0b-a39f307806f2",
+      "name": "SSH reboot: server-01",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        4288,
+        2352
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": "SSH server-01"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    monitorName: $('Prepare confirmation').first().json.monitorName,\n    incidentUrl: $('Prepare confirmation').first().json.incidentUrl,\n    checkUrl: $('Prepare confirmation').first().json.checkUrl,\n    attempt: 0,\n    maxAttempts: 6\n  }\n}];"
+      },
+      "id": "03e64462-e047-47ea-a94d-3e40757d5d08",
+      "name": "Prepare verification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4800,
+        3024
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "796c12e2-521d-401d-bb1d-1f60f32d4081",
+      "name": "Wait 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        5024,
+        2848
+      ],
+      "webhookId": "6cf127ed-13a9-4342-bcf4-19eef50d8bf2"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Prepare verification').first().json.checkUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "60e03a0c-a986-44f9-807e-2cd1ebeb1c29",
+      "name": "Check website",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5248,
+        2848
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 400,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              },
+              "id": "1240ddf1-a61e-4354-89f0-de4a7edc4104"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5bdfa7f8-8881-4659-9291-c72caedba8a2",
+      "name": "HTTP 200?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        5472,
+        2848
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Prepare verification').first().json;\nconst attempt = $runIndex + 1;\n\nreturn [{\n  json: {\n    ...base,\n    attempt\n  }\n}];"
+      },
+      "id": "a3192201-1efb-4198-bc1a-d8fc08529b75",
+      "name": "Count attempt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5472,
+        2992
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.attempt }}",
+              "rightValue": "={{ $json.maxAttempts }}",
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              },
+              "id": "964501bc-ed34-43e2-b3c4-30877fa319e3"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a9b3993f-4455-4900-8aad-0a8ccae32dcd",
+      "name": "Retries left? (max 6 = 3 min)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        5696,
+        2992
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "monitoring@example.com",
+        "toEmail": "ops-team@example.com",
+        "subject": "=✅ {{ $('Prepare verification').first().json.monitorName }} recovered after automatic reboot",
+        "emailFormat": "text",
+        "text": "Website recovered after automatic reboot.",
+        "options": {}
+      },
+      "id": "5f5175f3-bdd4-41e6-9698-8607cfdaf96a",
+      "name": "Email: recovered",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        5696,
+        2752
+      ],
+      "webhookId": "36df2419-9803-471f-afe4-b1ede8f2bf75",
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": "SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "monitoring@example.com",
+        "toEmail": "ops-team@example.com",
+        "subject": "=🚨 {{ $('Prepare verification').first().json.monitorName }} STILL DOWN after automatic reboot",
+        "emailFormat": "text",
+        "text": "Website is STILL DOWN after automatic reboot. Manual action required.",
+        "options": {}
+      },
+      "id": "fbb78f9f-4a32-4f60-8645-1f566d6798dc",
+      "name": "Email: still down",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        5904,
+        2992
+      ],
+      "webhookId": "3e66e255-e149-4c12-94fa-7295a44243e3",
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": "SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "sudo reboot"
+      },
+      "id": "4701c4d8-e205-46a2-824b-11ff59a9d3db",
+      "name": "SSH reboot: server-02",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        4288,
+        2512
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": "SSH server-02"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "sudo reboot"
+      },
+      "id": "042153b3-7fc8-4fe2-abda-f1b7b8eae51b",
+      "name": "SSH reboot: server-03",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        4304,
+        2656
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "",
+          "name": "SSH server-03"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook: uptime alert": {
+      "main": [
+        [
+          {
+            "node": "Is OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is OK?": {
+      "main": [
+        [
+          {
+            "node": "Already recovered",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare confirmation": {
+      "main": [
+        [
+          {
+            "node": "Wait 60s (confirm)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 60s (confirm)": {
+      "main": [
+        [
+          {
+            "node": "Check if still down",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if still down": {
+      "main": [
+        [
+          {
+            "node": "Back up?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Back up?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Back up?": {
+      "main": [
+        [
+          {
+            "node": "End: recovered by itself",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Count confirmation attempt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count confirmation attempt": {
+      "main": [
+        [
+          {
+            "node": "Confirmation attempts left?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmation attempts left?": {
+      "main": [
+        [
+          {
+            "node": "Wait 60s (confirm)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Which server?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Which server?": {
+      "main": [
+        [
+          {
+            "node": "SSH reboot: server-01",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SSH reboot: server-02",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SSH reboot: server-03",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "SSH reboot: server-01": {
+      "main": [
+        [
+          {
+            "node": "Prepare verification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare verification": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s": {
+      "main": [
+        [
+          {
+            "node": "Check website",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check website": {
+      "main": [
+        [
+          {
+            "node": "HTTP 200?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP 200?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP 200?": {
+      "main": [
+        [
+          {
+            "node": "Email: recovered",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Count attempt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count attempt": {
+      "main": [
+        [
+          {
+            "node": "Retries left? (max 6 = 3 min)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retries left? (max 6 = 3 min)": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email: still down",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH reboot: server-02": {
+      "main": [
+        [
+          {
+            "node": "Prepare verification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH reboot: server-03": {
+      "main": [
+        [
+          {
+            "node": "Prepare verification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {}
+}
