@@ -1,0 +1,341 @@
+{
+  "name": "Meeting briefings (Calendar + Gmail history → AI briefing)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Meeting briefings\nEvery 15 min in office hours: meetings starting in the next hour with **external** guests → recent emails with them → AI briefing (context, open topics, agenda) → email to you.\nEach meeting is briefed once (workflow static data).",
+        "height": 180,
+        "width": 540,
+        "color": 7
+      },
+      "id": "686fdb22-7586-4aa0-b2a0-76141c464745",
+      "name": "Note 8a26",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */15 8-18 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "733a726a-5857-4f9d-9f7c-0bea91b35ce2",
+      "name": "Every 15 min, office hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "mode": "list",
+          "value": "primary",
+          "cachedResultName": "Primary calendar"
+        },
+        "returnAll": true,
+        "timeMin": "={{ $now.plus({ minutes: 15 }) }}",
+        "timeMax": "={{ $now.plus({ minutes: 75 }) }}",
+        "options": {
+          "singleEvents": true,
+          "orderBy": "startTime"
+        }
+      },
+      "id": "1b2c1f47-d3b1-4b35-89cc-2a8a557da095",
+      "name": "Calendar: upcoming meetings",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        0
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "",
+          "name": "Google Calendar"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Meetings with external guests that start soon and were not briefed yet.\nconst state = $getWorkflowStaticData('global');\nstate.briefed = state.briefed || {};\nconst internal = String($env.INTERNAL_EMAIL_DOMAIN || '').toLowerCase();\nconst now = Date.now();\nfor (const [id, ts] of Object.entries(state.briefed)) if (now - ts > 7 * 864e5) delete state.briefed[id];  // keep it small\n\nconst out = [];\nfor (const { json: e } of $input.all()) {\n  if (!e.start?.dateTime || state.briefed[e.id]) continue;          // skip all-day and already briefed\n  const guests = (e.attendees || []).map(a => String(a.email).toLowerCase())\n    .filter(a => !a.endsWith('@' + internal) && !a.includes('resource.calendar'));\n  if (!guests.length) continue;                                      // internal-only meeting\n  state.briefed[e.id] = now;\n  out.push({ json: {\n    eventId: e.id, title: e.summary ?? '(no title)', start: e.start.dateTime, description: e.description ?? '',\n    guests, gmail_query: `(from:(${guests.join(' OR ')}) OR to:(${guests.join(' OR ')})) newer_than:60d`,\n  } });\n}\nreturn out;\n"
+      },
+      "id": "93bf9fa8-2884-4b01-9169-ed70b413cb9b",
+      "name": "External meetings not yet briefed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "1be0205a-50f3-4774-8c11-38e9108649a3",
+      "name": "Loop over meetings",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 15,
+        "simple": true,
+        "filters": {
+          "q": "={{ $json.gmail_query }}"
+        },
+        "options": {}
+      },
+      "id": "22e7416b-0768-4cda-9d8c-e507b627e845",
+      "name": "Gmail: recent emails with guests",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        960,
+        100
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "emails",
+        "options": {}
+      },
+      "id": "8a70cb51-f961-4171-ba08-bb8aab469a25",
+      "name": "Collect emails",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recent emails with the guests, compacted, plus the request for the model.\nconst event = $('Loop over meetings').item.json;\nconst mails = ($json.emails || []).filter(m => m.id).slice(0, 15).map(m =>\n  `- ${m.date ?? ''} | ${m.from?.text ?? m.From ?? ''} | ${m.subject ?? m.Subject ?? ''}: ` +\n  String(m.snippet ?? m.text ?? '').replace(/\\s+/g, ' ').slice(0, 300)\n).join('\\n') || '(no recent emails)';\n\nconst schema = {\n  type: 'object', additionalProperties: false,\n  properties: {\n    context: { type: 'string' },\n    last_interaction: { type: 'string' },\n    open_topics: { type: 'array', items: { type: 'string' } },\n    suggested_agenda: { type: 'array', items: { type: 'string' } },\n    watch_out: { type: 'string' },\n  },\n  required: ['context', 'last_interaction', 'open_topics', 'suggested_agenda', 'watch_out'],\n};\n\nreturn [{ json: {\n  event,\n  openai_payload: {\n    model: $env.OPENAI_MODEL || 'gpt-5.6-luna',\n    instructions: 'Prepare a short briefing for an upcoming meeting from the recent email history with the guests. ' +\n      'Only use facts from the emails and the event; if there is little history, say so. Write in ' +\n      ($env.BRIEFING_LANGUAGE || 'Spanish') + '.',\n    input: `Meeting: ${event.title}\\nStarts: ${event.start}\\nGuests: ${event.guests.join(', ')}\\n` +\n      `Description: ${event.description}\\n\\nRecent emails:\\n${mails}`,\n    text: { format: { type: 'json_schema', name: 'meeting_briefing', strict: true, schema } },\n  },\n} }];\n"
+      },
+      "id": "7047a098-8fea-49bf-a205-7f96873442f8",
+      "name": "Build briefing request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.openai_payload }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "d35a938d-2f86-415b-9f8e-73acdfa6f8a7",
+      "name": "OpenAI: write briefing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        100
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": "OpenAI API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseResponse(res) {\n  const message = (res.output || []).find(o => o.type === 'message');\n  const part = message?.content?.find(c => c.type === 'output_text' || c.type === 'refusal');\n  if (!part || part.type === 'refusal') throw new Error('The model returned no usable answer: ' + JSON.stringify(res).slice(0, 300));\n  return JSON.parse(part.text);\n}\n\nconst e = $('Build briefing request').item.json.event;\nconst b = parseResponse($json);\nconst list = (title, items) => items.length ? `<h3>${title}</h3><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul>` : '';\nconst when = new Date(e.start).toLocaleString('es-ES', { timeZone: $env.GENERIC_TIMEZONE || 'Europe/Madrid' });\nreturn [{ json: {\n  subject: `📅 Briefing: ${e.title} (${when})`,\n  html: `<div style=\"font-family:Arial,sans-serif;max-width:680px\">\n<p><b>${e.title}</b> · ${when}<br>Guests: ${e.guests.join(', ')}</p>\n<p>${b.context}</p><p><b>Last interaction:</b> ${b.last_interaction}</p>\n${list('Open topics', b.open_topics)}${list('Suggested agenda', b.suggested_agenda)}\n${b.watch_out ? `<p>⚠️ <b>Watch out:</b> ${b.watch_out}</p>` : ''}</div>`,\n} }];\n"
+      },
+      "id": "13f59064-8a82-4b5c-84a4-a14583ec72ea",
+      "name": "Build briefing email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.BRIEFING_TO }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "358a0faf-4706-4e0c-b237-7d37ac5b9d2f",
+      "name": "Gmail: send briefing",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2160,
+        100
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 15 min, office hours": {
+      "main": [
+        [
+          {
+            "node": "Calendar: upcoming meetings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calendar: upcoming meetings": {
+      "main": [
+        [
+          {
+            "node": "External meetings not yet briefed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "External meetings not yet briefed": {
+      "main": [
+        [
+          {
+            "node": "Loop over meetings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop over meetings": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Gmail: recent emails with guests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail: recent emails with guests": {
+      "main": [
+        [
+          {
+            "node": "Collect emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect emails": {
+      "main": [
+        [
+          {
+            "node": "Build briefing request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build briefing request": {
+      "main": [
+        [
+          {
+            "node": "OpenAI: write briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI: write briefing": {
+      "main": [
+        [
+          {
+            "node": "Build briefing email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build briefing email": {
+      "main": [
+        [
+          {
+            "node": "Gmail: send briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail: send briefing": {
+      "main": [
+        [
+          {
+            "node": "Loop over meetings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

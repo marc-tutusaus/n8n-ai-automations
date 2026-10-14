@@ -1,0 +1,291 @@
+{
+  "name": "Daily email digest → Teams (AI briefing)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Daily email digest\nEvery weekday at 07:30: unread emails from the last 24 h → AI groups them into *urgent*, *reply today* and *FYI* → message to you on Teams.\nSenders and subjects in the message come from Outlook, not from the model.",
+        "height": 180,
+        "width": 520,
+        "color": 7
+      },
+      "id": "a2a74ae5-3672-4152-94a7-3fda225d2385",
+      "name": "Note 97ab",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 30 7 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "c9920e3e-fd46-444c-a038-9661b4241cb0",
+      "name": "Weekdays 07:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 60,
+        "output": "simple",
+        "filtersUI": {
+          "values": {
+            "filterBy": "filters",
+            "filters": {
+              "readStatus": "unread",
+              "receivedAfter": "={{ $now.minus({ hours: 24 }).toISO() }}"
+            }
+          }
+        },
+        "options": {}
+      },
+      "id": "ce13a4f6-cbe5-4c8d-a1a2-a4c3af2889e6",
+      "name": "Unread emails since yesterday",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "",
+          "name": "Microsoft Outlook"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compact list of unread emails for the model (preview only, not full bodies).\nconst mails = $input.all().map(i => i.json).filter(m => m.id);\nif (!mails.length) return [{ json: { empty: true } }];\nconst list = mails.map((m, n) =>\n  `#${n + 1} | from: ${m.from?.emailAddress?.name ?? ''} <${m.from?.emailAddress?.address ?? ''}> | ` +\n  `subject: ${m.subject ?? ''} | importance: ${m.importance ?? 'normal'} | received: ${m.receivedDateTime ?? ''}\\n` +\n  `${String(m.bodyPreview ?? '').replace(/\\s+/g, ' ').slice(0, 400)}`\n).join('\\n\\n');\nreturn [{ json: { empty: false, count: mails.length, list } }];\n"
+      },
+      "id": "f9310ffe-32e9-44bc-97fa-9b3822617894",
+      "name": "Compact list for the AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9d819136-f2fe-42d0-b837-a5604ebd7cbe",
+              "leftValue": "={{ $json.empty }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "58337d5d-37bc-41d1-b6ad-058e10a572db",
+      "name": "Any unread?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const schema = {\n  type: 'object', additionalProperties: false,\n  properties: {\n    headline: { type: 'string' },\n    urgent: { type: 'array', items: { type: 'object', additionalProperties: false,\n      properties: { email: { type: 'integer' }, why: { type: 'string' }, next_step: { type: 'string' } },\n      required: ['email', 'why', 'next_step'] } },\n    reply_today: { type: 'array', items: { type: 'object', additionalProperties: false,\n      properties: { email: { type: 'integer' }, what_they_need: { type: 'string' } },\n      required: ['email', 'what_they_need'] } },\n    fyi: { type: 'array', items: { type: 'object', additionalProperties: false,\n      properties: { email: { type: 'integer' }, one_line: { type: 'string' } },\n      required: ['email', 'one_line'] } },\n  },\n  required: ['headline', 'urgent', 'reply_today', 'fyi'],\n};\n\nreturn [{ json: {\n  ...$json,\n  openai_payload: {\n    model: $env.OPENAI_MODEL || 'gpt-5.6-luna',\n    instructions: 'You prepare a morning email briefing for a busy professional. Group the emails: urgent (needs action today, blocking someone, deadlines, angry customers), reply_today, and fyi (newsletters, notifications, no action). ' + 'Refer to emails by their #number. Be concise and write in the language set in BRIEFING_LANGUAGE: ' + ($env.BRIEFING_LANGUAGE || 'Spanish') + '.',\n    input: `${$json.count} unread emails:\\n\\n${$json.list}`,\n    text: { format: { type: 'json_schema', name: 'email_digest', strict: true, schema } },\n  },\n} }];\n"
+      },
+      "id": "96924deb-bbce-495f-a5ae-97a02e9732fc",
+      "name": "Build digest request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.openai_payload }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "86895ab9-17b6-4167-840e-971fdab93019",
+      "name": "OpenAI: prioritize emails",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        -80
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": "OpenAI API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseResponse(res) {\n  const message = (res.output || []).find(o => o.type === 'message');\n  const part = message?.content?.find(c => c.type === 'output_text' || c.type === 'refusal');\n  if (!part || part.type === 'refusal') throw new Error('The model returned no usable answer: ' + JSON.stringify(res).slice(0, 300));\n  return JSON.parse(part.text);\n}\n\n// Build the Teams message; subjects and senders come from the source emails, not from the model.\nconst d = parseResponse($json);\nconst mails = $('Unread emails since yesterday').all().map(i => i.json);\nconst ref = n => {\n  const m = mails[n - 1];\n  return m ? `<b>${m.from?.emailAddress?.name ?? ''}</b>: ${m.subject ?? ''}` : `#${n}`;\n};\nconst section = (title, rows) => rows.length ? `<h3>${title}</h3><ul>${rows.join('')}</ul>` : '';\n\nconst html = `<p>☀️ <b>${d.headline}</b> (${mails.length} unread)</p>` +\n  section('🔴 Urgent', d.urgent.map(u => `<li>${ref(u.email)}<br>${u.why} → <i>${u.next_step}</i></li>`)) +\n  section('🟡 Reply today', d.reply_today.map(r => `<li>${ref(r.email)}: ${r.what_they_need}</li>`)) +\n  section('⚪ FYI', d.fyi.map(f => `<li>${ref(f.email)}: ${f.one_line}</li>`));\nreturn [{ json: { html } }];\n"
+      },
+      "id": "f18f0f12-a270-4a2a-ab71-a0307ab613a1",
+      "name": "Format Teams message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "chatMessage",
+        "operation": "create",
+        "chatId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.TEAMS_CHAT_ID }}"
+        },
+        "contentType": "html",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "070bac0d-8d53-40b1-aede-00ed64973e5e",
+      "name": "Teams: send digest",
+      "type": "n8n-nodes-base.microsoftTeams",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        -80
+      ],
+      "credentials": {
+        "microsoftTeamsOAuth2Api": {
+          "id": "",
+          "name": "Microsoft Teams"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Weekdays 07:30": {
+      "main": [
+        [
+          {
+            "node": "Unread emails since yesterday",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unread emails since yesterday": {
+      "main": [
+        [
+          {
+            "node": "Compact list for the AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compact list for the AI": {
+      "main": [
+        [
+          {
+            "node": "Any unread?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any unread?": {
+      "main": [
+        [
+          {
+            "node": "Build digest request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build digest request": {
+      "main": [
+        [
+          {
+            "node": "OpenAI: prioritize emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI: prioritize emails": {
+      "main": [
+        [
+          {
+            "node": "Format Teams message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Teams message": {
+      "main": [
+        [
+          {
+            "node": "Teams: send digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,403 @@
+{
+  "name": "Web form → AI lead qualification → Excel CRM + Outlook welcome + Teams",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Lead form → CRM\nn8n form → AI qualifies the need and writes a personal welcome → **code** sets the final priority (model fit + company size rule) → Excel CRM → welcome email from Outlook → hot leads announced to sales on Teams.",
+        "height": 170,
+        "width": 540,
+        "color": 7
+      },
+      "id": "a3f3613c-eaf8-475d-806e-38bad28f27ea",
+      "name": "Note 2607",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "path": "contact",
+        "formTitle": "Talk to us",
+        "formDescription": "Tell us what you need and a consultant will contact you within one working day.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Name",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Email",
+              "fieldType": "email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Company",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Company size",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "1-10"
+                  },
+                  {
+                    "option": "11-50"
+                  },
+                  {
+                    "option": "51-250"
+                  },
+                  {
+                    "option": "250+"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "How can we help?",
+              "fieldType": "textarea",
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "onReceived",
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Send"
+        }
+      },
+      "id": "945fb2ff-d865-4a33-a5f7-4643f95e2535",
+      "name": "Contact form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.3,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "ca439461-0a1f-4586-8981-9a82c5c21e69"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize the form submission (field labels come from the Form Trigger).\nconst f = $json;\nreturn [{ json: {\n  name: f['Name'], email: String(f['Email'] || '').trim().toLowerCase(), company: f['Company'],\n  employees: f['Company size'], need: f['How can we help?'], submitted_at: f.submittedAt ?? new Date().toISOString(),\n} }];\n"
+      },
+      "id": "ea4d0816-ff1d-4eae-bf51-b0c8c6681e29",
+      "name": "Normalize submission",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const schema = {\n  type: 'object', additionalProperties: false,\n  properties: {\n    fit_score: { type: 'integer', minimum: 0, maximum: 100 },\n    need_summary: { type: 'string' },\n    recommended_service: { type: 'string' },\n    language: { type: 'string' },\n    welcome_subject: { type: 'string' },\n    welcome_body: { type: 'string' },\n  },\n  required: ['fit_score', 'need_summary', 'recommended_service', 'language', 'welcome_subject', 'welcome_body'],\n};\n\nreturn [{ json: {\n  ...$json,\n  openai_payload: {\n    model: $env.OPENAI_MODEL || 'gpt-5.6-luna',\n    instructions: 'You qualify inbound leads for a B2B services company and write a personal welcome email. fit_score: how well ' + 'the need matches the services (0-100). The welcome email: in the lead language, warm, 4-6 lines, mention their ' + 'need in your own words, say a consultant will contact them within one working day. Never mention prices.' + ($env.COMPANY_SERVICES ? '\\n\\nServices we offer:\\n' + $env.COMPANY_SERVICES : ''),\n    input: `Name: ${$json.name}\\nCompany: ${$json.company}\\nCompany size: ${$json.employees}\\nNeed: ${$json.need}`,\n    text: { format: { type: 'json_schema', name: 'lead_qualification', strict: true, schema } },\n  },\n} }];\n"
+      },
+      "id": "91f9c454-93fb-43b0-a071-62bbb55c26f3",
+      "name": "Build qualification request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.openai_payload }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "4633779d-4da1-400b-ade1-089efc524407",
+      "name": "OpenAI: qualify + write welcome",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": "OpenAI API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseResponse(res) {\n  const message = (res.output || []).find(o => o.type === 'message');\n  const part = message?.content?.find(c => c.type === 'output_text' || c.type === 'refusal');\n  if (!part || part.type === 'refusal') throw new Error('The model returned no usable answer: ' + JSON.stringify(res).slice(0, 300));\n  return JSON.parse(part.text);\n}\n\n// Final priority = model fit + a deterministic size rule (auditable, easy to tune).\nconst lead = $('Normalize submission').item.json;\nconst q = parseResponse($json);\nconst sizeBonus = { '1-10': 0, '11-50': 10, '51-250': 20, '250+': 25 }[lead.employees] ?? 0;\nconst score = Math.min(100, q.fit_score + sizeBonus);\nconst tier = score >= 75 ? 'hot' : score >= 45 ? 'warm' : 'cold';\nreturn [{ json: { ...lead, ...q, score, tier } }];\n"
+      },
+      "id": "2daacfba-bafe-421e-bc61-0e8847cb93e7",
+      "name": "Score lead in code",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const l = $json;\nreturn [{ json: { submitted_at: l.submitted_at, name: l.name, email: l.email, company: l.company, company_size: l.employees,\n  need: l.need, need_summary: l.need_summary, recommended_service: l.recommended_service, score: l.score, tier: l.tier,\n  status: 'new' } }];\n"
+      },
+      "id": "d34fbd53-307a-43de-954f-22e5f3eed8d6",
+      "name": "Build CRM row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "table",
+        "operation": "append",
+        "workbook": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.CRM_WORKBOOK_ID }}"
+        },
+        "worksheet": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.CRM_WORKSHEET_ID }}"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.CRM_TABLE }}"
+        },
+        "dataMode": "autoMap",
+        "options": {}
+      },
+      "id": "13f758f6-b92c-432f-a1aa-446ea6f57db0",
+      "name": "Excel: add to CRM",
+      "type": "n8n-nodes-base.microsoftExcel",
+      "typeVersion": 2.1,
+      "position": [
+        1440,
+        0
+      ],
+      "credentials": {
+        "microsoftExcelOAuth2Api": {
+          "id": "",
+          "name": "Microsoft Excel"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "toRecipients": "={{ $('Score lead in code').item.json.email }}",
+        "subject": "={{ $('Score lead in code').item.json.welcome_subject }}",
+        "bodyContent": "={{ $('Score lead in code').item.json.welcome_body }}",
+        "additionalFields": {
+          "bodyContentType": "Text"
+        }
+      },
+      "id": "e3a7a78f-8d35-4994-b09a-d52e64b1ac25",
+      "name": "Outlook: send welcome",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "",
+          "name": "Microsoft Outlook"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d0c7218a-59b1-40c6-b5eb-af2c5be55933",
+              "leftValue": "={{ $('Score lead in code').item.json.tier }}",
+              "rightValue": "hot",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c401768a-b8ab-4d72-83b5-0889ad5fbf21",
+      "name": "Hot lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "channelMessage",
+        "operation": "create",
+        "teamId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.TEAMS_TEAM_ID }}"
+        },
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.TEAMS_SALES_CHANNEL_ID }}"
+        },
+        "contentType": "html",
+        "message": "=🔥 <b>Hot lead</b> ({{ $('Score lead in code').item.json.score }}/100): <b>{{ $('Score lead in code').item.json.name }}</b> · {{ $('Score lead in code').item.json.company }} ({{ $('Score lead in code').item.json.employees }})<br>{{ $('Score lead in code').item.json.need_summary }}<br>Suggested: {{ $('Score lead in code').item.json.recommended_service }}",
+        "options": {}
+      },
+      "id": "af77e82d-cc4f-4dbe-b2b9-81e21c6512f6",
+      "name": "Teams: alert sales",
+      "type": "n8n-nodes-base.microsoftTeams",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        -80
+      ],
+      "credentials": {
+        "microsoftTeamsOAuth2Api": {
+          "id": "",
+          "name": "Microsoft Teams"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Contact form": {
+      "main": [
+        [
+          {
+            "node": "Normalize submission",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize submission": {
+      "main": [
+        [
+          {
+            "node": "Build qualification request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build qualification request": {
+      "main": [
+        [
+          {
+            "node": "OpenAI: qualify + write welcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI: qualify + write welcome": {
+      "main": [
+        [
+          {
+            "node": "Score lead in code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score lead in code": {
+      "main": [
+        [
+          {
+            "node": "Build CRM row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build CRM row": {
+      "main": [
+        [
+          {
+            "node": "Excel: add to CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Excel: add to CRM": {
+      "main": [
+        [
+          {
+            "node": "Outlook: send welcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outlook: send welcome": {
+      "main": [
+        [
+          {
+            "node": "Hot lead?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hot lead?": {
+      "main": [
+        [
+          {
+            "node": "Teams: alert sales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

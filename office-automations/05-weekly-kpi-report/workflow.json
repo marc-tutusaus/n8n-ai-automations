@@ -1,0 +1,242 @@
+{
+  "name": "Weekly KPI report (Sheets → code KPIs → AI commentary → email)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Weekly KPI report\nEvery Monday: daily KPIs from Google Sheets → **week-over-week changes computed in code** → AI writes the commentary using only those numbers → HTML email to management.\nSheet columns: date, revenue, orders, new_customers, tickets_opened, tickets_closed.",
+        "height": 180,
+        "width": 540,
+        "color": 7
+      },
+      "id": "c6dbb123-6382-4330-8fef-b3a0217a137b",
+      "name": "Note ff9a",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "2b2b995c-8c81-4e29-9cab-043654ca613a",
+      "name": "Mondays 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.KPI_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Daily KPIs"
+        },
+        "options": {}
+      },
+      "id": "2886ea94-b006-4400-98ed-abc504d5ca05",
+      "name": "Sheets: read daily KPIs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        240,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// All numbers are computed here, in code. The model only explains them.\nconst rows = $input.all().map(i => i.json).filter(r => r.date);\nconst metrics = ['revenue', 'orders', 'new_customers', 'tickets_opened', 'tickets_closed'];\nconst day = d => new Date(String(d).slice(0, 10) + 'T00:00:00Z');\n\nconst today = new Date(); today.setUTCHours(0, 0, 0, 0);\nconst thisStart = new Date(today); thisStart.setUTCDate(today.getUTCDate() - 7);\nconst prevStart = new Date(today); prevStart.setUTCDate(today.getUTCDate() - 14);\n\nconst sum = (from, to, m) => rows.filter(r => day(r.date) >= from && day(r.date) < to)\n  .reduce((acc, r) => acc + (Number(String(r[m]).replace(',', '.')) || 0), 0);\n\nconst table = metrics.map(m => {\n  const current = sum(thisStart, today, m), previous = sum(prevStart, thisStart, m);\n  const change_pct = previous ? Math.round((current - previous) / previous * 1000) / 10 : null;\n  return { metric: m, current: Math.round(current * 100) / 100, previous: Math.round(previous * 100) / 100, change_pct };\n});\nconst [revenue, orders] = [table[0].current, table[1].current];\nconst avgTicket = orders ? Math.round(revenue / orders * 100) / 100 : null;\nconst backlogChange = table[3].current - table[4].current;\n\nreturn [{ json: {\n  period: `${thisStart.toISOString().slice(0, 10)} → ${new Date(today - 864e5).toISOString().slice(0, 10)}`,\n  table, avg_order_value: avgTicket, ticket_backlog_change: backlogChange, days_with_data: rows.length,\n} }];\n"
+      },
+      "id": "068023f0-222d-4e9d-9f10-09c69b255fcd",
+      "name": "Compute KPIs in code",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const schema = {\n  type: 'object', additionalProperties: false,\n  properties: {\n    subject: { type: 'string' },\n    headline: { type: 'string' },\n    highlights: { type: 'array', items: { type: 'string' } },\n    concerns: { type: 'array', items: { type: 'string' } },\n    actions: { type: 'array', items: { type: 'string' } },\n  },\n  required: ['subject', 'headline', 'highlights', 'concerns', 'actions'],\n};\n\nreturn [{ json: {\n  ...$json,\n  openai_payload: {\n    model: $env.OPENAI_MODEL || 'gpt-5.6-luna',\n    instructions: 'You write the weekly KPI note for the management team. Use ONLY the numbers given; do not compute new figures ' + '(no new percentages, sums or averages). Max 3 bullets per section, plain business language, in ' + ($env.REPORT_LANGUAGE || 'Spanish') + '.',\n    input: 'Computed KPIs (JSON):\\n' + JSON.stringify({ period: $json.period, table: $json.table, avg_order_value: $json.avg_order_value, ticket_backlog_change: $json.ticket_backlog_change }),\n    text: { format: { type: 'json_schema', name: 'kpi_report', strict: true, schema } },\n  },\n} }];\n"
+      },
+      "id": "74f49cb8-1443-4244-8896-ea7947fb715e",
+      "name": "Build report request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.openai_payload }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "e0dbfb94-d4c1-4063-9a80-6454368848bb",
+      "name": "OpenAI: write commentary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": "OpenAI API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseResponse(res) {\n  const message = (res.output || []).find(o => o.type === 'message');\n  const part = message?.content?.find(c => c.type === 'output_text' || c.type === 'refusal');\n  if (!part || part.type === 'refusal') throw new Error('The model returned no usable answer: ' + JSON.stringify(res).slice(0, 300));\n  return JSON.parse(part.text);\n}\n\nconst k = $('Compute KPIs in code').item.json;\nconst r = parseResponse($json);\nconst fmt = v => v == null ? '—' : Number(v).toLocaleString('es-ES');\nconst arrow = p => p == null ? '' : p > 0 ? `▲ ${p}%` : p < 0 ? `▼ ${Math.abs(p)}%` : '= 0%';\nconst rows = k.table.map(t => `<tr><td>${t.metric.replace('_', ' ')}</td><td align=\"right\">${fmt(t.current)}</td>\n  <td align=\"right\">${fmt(t.previous)}</td><td align=\"right\">${arrow(t.change_pct)}</td></tr>`).join('');\nconst list = (title, items) => items.length ? `<h3>${title}</h3><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul>` : '';\n\nconst html = `<div style=\"font-family:Arial,sans-serif;max-width:680px\">\n<p><b>${r.headline}</b><br><span style=\"color:#64748b\">${k.period}</span></p>\n<table cellpadding=\"6\" style=\"border-collapse:collapse;font-size:14px\" border=\"1\" bordercolor=\"#e2e8f0\">\n<tr style=\"background:#f1f5f9\"><th align=\"left\">Metric</th><th>This week</th><th>Last week</th><th>Change</th></tr>${rows}</table>\n${list('Highlights', r.highlights)}${list('Watch', r.concerns)}${list('Suggested actions', r.actions)}\n<p style=\"color:#94a3b8;font-size:12px\">Figures computed by the workflow; text written by AI from those figures.</p></div>`;\nreturn [{ json: { subject: r.subject, html } }];\n"
+      },
+      "id": "d5006f26-4cd9-40a7-aa99-acf4f0fc35fc",
+      "name": "Build HTML email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.REPORT_TO }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "ee0d843a-cb07-4b12-b9f1-92ffce418098",
+      "name": "Gmail: send report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1440,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Mondays 08:00": {
+      "main": [
+        [
+          {
+            "node": "Sheets: read daily KPIs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: read daily KPIs": {
+      "main": [
+        [
+          {
+            "node": "Compute KPIs in code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute KPIs in code": {
+      "main": [
+        [
+          {
+            "node": "Build report request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build report request": {
+      "main": [
+        [
+          {
+            "node": "OpenAI: write commentary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI: write commentary": {
+      "main": [
+        [
+          {
+            "node": "Build HTML email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build HTML email": {
+      "main": [
+        [
+          {
+            "node": "Gmail: send report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

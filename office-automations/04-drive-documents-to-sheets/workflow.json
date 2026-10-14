@@ -1,0 +1,370 @@
+{
+  "name": "Drive documents → classified, renamed and logged in Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Drive document inbox\nA file dropped in the *Inbox* folder → AI identifies the document and its fields → **code** builds a standard name and picks *Processed* or *Review* → rename, move, log in Sheets.",
+        "height": 160,
+        "width": 520,
+        "color": 7
+      },
+      "id": "a8a452ea-344c-4f0e-a488-2f142f52d419",
+      "name": "Note 0372",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.DRIVE_INBOX_FOLDER_ID }}"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "ac530250-038c-4350-b796-1119062c4d64",
+      "name": "New file in inbox folder",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": "Google Drive"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "options": {
+          "binaryPropertyName": "data"
+        }
+      },
+      "id": "d627764a-dcea-4e7d-930a-e2563c5ef1ff",
+      "name": "Drive: download file",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        240,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": "Google Drive"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "2f0f11f6-aeb5-45ee-abb7-f832a33ccd9a",
+      "name": "Extract PDF text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const schema = {\n  type: 'object', additionalProperties: false,\n  properties: {\n    doc_type: { type: 'string', enum: ['invoice', 'receipt', 'delivery_note', 'quote', 'contract', 'other'] },\n    counterparty: { type: 'string' },\n    document_date: { type: 'string', description: 'YYYY-MM-DD or empty' },\n    reference: { type: 'string' },\n    total_amount: { type: ['number', 'null'] },\n    currency: { type: 'string' },\n    summary: { type: 'string' },\n    confidence: { type: 'integer', minimum: 0, maximum: 100 },\n  },\n  required: ['doc_type', 'counterparty', 'document_date', 'reference', 'total_amount', 'currency', 'summary', 'confidence'],\n};\n\nreturn [{ json: {\n  ...$json,\n  openai_payload: {\n    model: $env.OPENAI_MODEL || 'gpt-5.6-luna',\n    instructions: 'Identify this business document and extract its key fields. Copy values as printed; do not calculate or ' + 'guess. summary: one sentence. Dates as YYYY-MM-DD; empty string or null when missing.',\n    input: `File name: ${$('New file in inbox folder').item.json.name}\\n\\n${String($json.text || '').slice(0, 15000)}`,\n    text: { format: { type: 'json_schema', name: 'document_extraction', strict: true, schema } },\n  },\n} }];\n"
+      },
+      "id": "3c9b13a2-c2d7-4136-b657-9c1ecf4961e4",
+      "name": "Build extraction request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.openai_payload }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "188c2bb4-d727-467f-946b-cae4309f553b",
+      "name": "OpenAI: identify document",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": "OpenAI API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseResponse(res) {\n  const message = (res.output || []).find(o => o.type === 'message');\n  const part = message?.content?.find(c => c.type === 'output_text' || c.type === 'refusal');\n  if (!part || part.type === 'refusal') throw new Error('The model returned no usable answer: ' + JSON.stringify(res).slice(0, 300));\n  return JSON.parse(part.text);\n}\n\n// Standard file name and destination are decided in code.\nconst file = $('New file in inbox folder').item.json;\nconst d = parseResponse($json);\nconst slug = s => String(s || 'unknown').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')\n  .replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'unknown';\nconst date = /^\\d{4}-\\d{2}-\\d{2}$/.test(d.document_date) ? d.document_date : 'no-date';\nconst ext = (file.name.match(/\\.[A-Za-z0-9]+$/) || ['.pdf'])[0];\nconst needsReview = d.confidence < 70 || d.doc_type === 'other' || date === 'no-date';\n\nreturn [{ json: {\n  ...d,\n  file_id: file.id,\n  original_name: file.name,\n  new_name: `${date}_${d.doc_type}_${slug(d.counterparty)}${d.reference ? '_' + slug(d.reference) : ''}${ext}`,\n  target_folder: needsReview ? $env.DRIVE_REVIEW_FOLDER_ID : $env.DRIVE_PROCESSED_FOLDER_ID,\n  status: needsReview ? 'needs review' : 'processed',\n  file_url: `https://drive.google.com/file/d/${file.id}/view`,\n  processed_at: new Date().toISOString(),\n} }];\n"
+      },
+      "id": "e42622bb-127e-4eab-b351-f8d06c170d47",
+      "name": "Decide name and folder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.file_id }}"
+        },
+        "newUpdatedFileName": "={{ $json.new_name }}",
+        "options": {}
+      },
+      "id": "35ddaa6a-4cd2-475d-8e68-9640b79ee52f",
+      "name": "Drive: rename",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1440,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": "Google Drive"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Decide name and folder').item.json.file_id }}"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Decide name and folder').item.json.target_folder }}"
+        }
+      },
+      "id": "c8e42f12-a0ea-48d6-87bb-31144043fc66",
+      "name": "Drive: move",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1680,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": "Google Drive"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Decide name and folder').item.json;\nreturn [{ json: { processed_at: d.processed_at, status: d.status, doc_type: d.doc_type, counterparty: d.counterparty,\n  document_date: d.document_date, reference: d.reference, total_amount: d.total_amount, currency: d.currency,\n  summary: d.summary, confidence: d.confidence, file_name: d.new_name, original_name: d.original_name, file_url: d.file_url } }];\n"
+      },
+      "id": "2d8fcd7b-16a9-4430-bcf6-a752419eec52",
+      "name": "Build register row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.DOCUMENTS_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Documents"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "4fc34235-f5c1-4421-95ad-423e0cb536e4",
+      "name": "Sheets: register document",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2160,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "New file in inbox folder": {
+      "main": [
+        [
+          {
+            "node": "Drive: download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive: download file": {
+      "main": [
+        [
+          {
+            "node": "Extract PDF text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract PDF text": {
+      "main": [
+        [
+          {
+            "node": "Build extraction request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build extraction request": {
+      "main": [
+        [
+          {
+            "node": "OpenAI: identify document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI: identify document": {
+      "main": [
+        [
+          {
+            "node": "Decide name and folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide name and folder": {
+      "main": [
+        [
+          {
+            "node": "Drive: rename",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive: rename": {
+      "main": [
+        [
+          {
+            "node": "Drive: move",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive: move": {
+      "main": [
+        [
+          {
+            "node": "Build register row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build register row": {
+      "main": [
+        [
+          {
+            "node": "Sheets: register document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

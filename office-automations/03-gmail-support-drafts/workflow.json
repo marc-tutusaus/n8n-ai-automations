@@ -1,0 +1,317 @@
+{
+  "name": "Gmail support → AI draft reply + Sheets log",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Gmail support assistant\nEach new email in the *support* label → AI classifies it and writes a **draft** reply in the same thread (a human reviews and sends) → label *ai-drafted* → log in Sheets.",
+        "height": 160,
+        "width": 520,
+        "color": 7
+      },
+      "id": "b8277697-011d-41cd-9a34-419620ad6fac",
+      "name": "Note 9c44",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "label:support -label:ai-drafted",
+          "readStatus": "unread"
+        },
+        "options": {}
+      },
+      "id": "9d0bca51-05db-423b-9b31-5ee0d5c4c706",
+      "name": "New support email",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize the Gmail message.\nconst m = $json;\nconst from = m.from?.value?.[0]?.address ?? m.from?.text ?? m.From ?? '';\nconst body = String(m.text ?? m.textPlain ?? m.snippet ?? '').replace(/\\n{3,}/g, '\\n\\n').trim();\nreturn [{ json: { messageId: m.id, threadId: m.threadId, from, subject: m.subject ?? m.Subject ?? '', body } }];\n"
+      },
+      "id": "197fad6c-07bb-494a-ab7c-e9be4640844d",
+      "name": "Normalize email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const schema = {\n  type: 'object', additionalProperties: false,\n  properties: {\n    category: { type: 'string', enum: ['billing', 'technical', 'account', 'sales', 'complaint', 'other'] },\n    priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },\n    sentiment: { type: 'string', enum: ['positive', 'neutral', 'negative'] },\n    language: { type: 'string' },\n    needs_human: { type: 'boolean' },\n    reason: { type: 'string' },\n    draft_reply: { type: 'string' },\n  },\n  required: ['category', 'priority', 'sentiment', 'language', 'needs_human', 'reason', 'draft_reply'],\n};\n\nreturn [{ json: {\n  ...$json,\n  openai_payload: {\n    model: $env.OPENAI_MODEL || 'gpt-5.6-luna',\n    instructions: 'You are a customer support assistant. Classify the email and write a DRAFT reply that a human agent will review ' + 'before sending. Reply in the customer language, be warm and concrete, and ask for any missing details. ' + 'Never promise refunds, discounts, deadlines or anything you cannot verify; if the request needs a decision ' + '(refund, legal, complaint, cancellation) set needs_human=true and write a short holding reply.' + ($env.SUPPORT_CONTEXT ? '\\n\\nCompany context:\\n' + $env.SUPPORT_CONTEXT : ''),\n    input: `From: ${$json.from}\\nSubject: ${$json.subject}\\n\\n${String($json.body).slice(0, 8000)}`,\n    text: { format: { type: 'json_schema', name: 'support_triage', strict: true, schema } },\n  },\n} }];\n"
+      },
+      "id": "44bf6134-4c20-43b2-bc81-bc103d547aee",
+      "name": "Build triage request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.openai_payload }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "ba27f1d7-e3ce-4e41-8420-a5f1cb20f9ad",
+      "name": "OpenAI: classify + draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "",
+          "name": "OpenAI API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseResponse(res) {\n  const message = (res.output || []).find(o => o.type === 'message');\n  const part = message?.content?.find(c => c.type === 'output_text' || c.type === 'refusal');\n  if (!part || part.type === 'refusal') throw new Error('The model returned no usable answer: ' + JSON.stringify(res).slice(0, 300));\n  return JSON.parse(part.text);\n}\n\nconst src = $('Normalize email').item.json;\nconst t = parseResponse($json);\nreturn [{ json: {\n  ...src, ...t,\n  reply_subject: /^re:/i.test(src.subject) ? src.subject : `Re: ${src.subject}`,\n  logged_at: new Date().toISOString(),\n  thread_url: `https://mail.google.com/mail/u/0/#all/${src.threadId}`,\n} }];\n"
+      },
+      "id": "6d17d14c-4777-48e2-aba0-2c7cf2fa61cb",
+      "name": "Parse triage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "operation": "create",
+        "subject": "={{ $json.reply_subject }}",
+        "emailType": "text",
+        "message": "={{ $json.draft_reply }}",
+        "options": {
+          "threadId": "={{ $json.threadId }}",
+          "sendTo": "={{ $json.from }}"
+        }
+      },
+      "id": "fbba0dd7-ae02-4ecf-9938-999bbf3d2a04",
+      "name": "Gmail: create draft in thread",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "addLabels",
+        "messageId": "={{ $('Parse triage').item.json.messageId }}",
+        "labelIds": "={{ [$env.GMAIL_AI_DRAFTED_LABEL_ID] }}"
+      },
+      "id": "abb5666d-fb31-44be-b693-3627fa067cf2",
+      "name": "Gmail: label ai-drafted",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1440,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: (({ logged_at, from, subject, category, priority, sentiment, language, needs_human, reason, thread_url }) =>\n  ({ logged_at, from, subject, category, priority, sentiment, language, needs_human, reason, thread_url }))($('Parse triage').item.json) }];\n"
+      },
+      "id": "7c76ad5b-c84c-4612-9f6d-db4db1f2e0f1",
+      "name": "Build log row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.SUPPORT_LOG_SHEET_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Log"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "8e4eb3aa-3eb3-4b88-8252-b49ccb42f859",
+      "name": "Sheets: log ticket",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1920,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "New support email": {
+      "main": [
+        [
+          {
+            "node": "Normalize email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize email": {
+      "main": [
+        [
+          {
+            "node": "Build triage request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build triage request": {
+      "main": [
+        [
+          {
+            "node": "OpenAI: classify + draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI: classify + draft": {
+      "main": [
+        [
+          {
+            "node": "Parse triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse triage": {
+      "main": [
+        [
+          {
+            "node": "Gmail: create draft in thread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail: create draft in thread": {
+      "main": [
+        [
+          {
+            "node": "Gmail: label ai-drafted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail: label ai-drafted": {
+      "main": [
+        [
+          {
+            "node": "Build log row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build log row": {
+      "main": [
+        [
+          {
+            "node": "Sheets: log ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
