@@ -11,7 +11,7 @@
 
 > 🔒 **Anonimizados.** Son exportaciones de workflows reales. He eliminado los nombres de la empresa y de los clientes, los hosts, los emails, los IDs, los tokens y las credenciales. Los endpoints ahora son variables de entorno y las credenciales solo se referencian por nombre. La lógica y la gestión de errores son las que funcionaron en producción. Algunos prompts los he traducido al inglés y generalizado (por ejemplo, los nombres de los equipos).
 
-## Workflows
+## Workflows de producción
 
 | # | Workflow | Área | Qué hace |
 |---|---|---|---|
@@ -25,9 +25,23 @@
 
 Cada carpeta contiene el `workflow.json` (importable), un `README.md` con el diagrama y las decisiones de diseño (en inglés) y un payload de ejemplo.
 
+## Automatizaciones de oficina · Microsoft 365 y Google Workspace
+
+Siete workflows más para el trabajo diario de oficina: correo, Excel y Sheets, Drive, Teams y el calendario. → **[office-automations/](office-automations/README.es.md)**
+
+| # | Workflow | Ecosistema |
+|---|---|---|
+| 01 | [Facturas de Outlook → Excel, con los totales comprobados en código](office-automations/01-outlook-invoices-to-excel) | Microsoft 365 |
+| 02 | [Resumen diario del correo → Teams](office-automations/02-daily-email-digest-teams) | Microsoft 365 |
+| 03 | [Soporte en Gmail → borradores de respuesta con IA + registro](office-automations/03-gmail-support-drafts) | Google Workspace |
+| 04 | [Documentos de Drive → clasificados, renombrados y registrados en Sheets](office-automations/04-drive-documents-to-sheets) | Google Workspace |
+| 05 | [Informe semanal de KPIs desde Sheets](office-automations/05-weekly-kpi-report) | Google Workspace |
+| 06 | [Briefings de reuniones con Calendar y el historial de Gmail](office-automations/06-meeting-briefings) | Google Workspace |
+| 07 | [Formulario web → CRM en Excel + bienvenida desde Outlook + aviso en Teams](office-automations/07-form-to-crm-welcome) | Microsoft 365 |
+
 ## Cómo construyo los workflows
 
-- **La IA sugiere y una persona decide.** Lo que genera el LLM va a notas internas y borradores. Nada llega a un cliente sin revisión.
+- **La IA sugiere y una persona decide.** Las respuestas a clientes y todo lo que compromete a la empresa van a notas internas y borradores para que una persona los revise. El único email que la IA envía directamente es la bienvenida a leads (07), y su prompt prohíbe hablar de precios o hacer promesas.
 - **Salidas estructuradas.** Esquemas JSON con `enum`s que coinciden con los valores del sistema de destino, y alternativas por si la respuesta no se puede interpretar.
 - **Los errores se ven.** Se escriben donde trabaja la gente (nota en el ticket, estado en Notion, email), no solo en el log de ejecuciones de n8n.
 - **Bucles limitados.** Cada reintento tiene un contador y un límite.
@@ -40,7 +54,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Abre http://localhost:5678 → **Workflows → Import from file** → elige cualquier `workflows/*/workflow.json` y asigna tus credenciales.
+Abre http://localhost:5678 → **Workflows → Import from file** → elige cualquier `workflows/*/workflow.json` u `office-automations/*/workflow.json` y asigna tus credenciales. El docker-compose usa n8n 2.43.5.
 
 ## Validación automática
 

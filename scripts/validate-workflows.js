@@ -1,4 +1,4 @@
-// Validates every workflows/*/workflow.json:
+// Validates every workflows/*/workflow.json and office-automations/*/workflow.json:
 //  - connections point to existing nodes
 //  - $('Node') / $node["Node"] references resolve
 //  - Code node JavaScript parses
@@ -6,7 +6,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const root = path.join(__dirname, "..", "workflows");
+const roots = ["workflows", "office-automations"].map((d) => path.join(__dirname, "..", d));
 const SECRET_PATTERNS = [
   [/sk-[A-Za-z0-9_-]{16,}/, "API key"],
   [/Token token=/i, "hard-coded token header"],
@@ -16,7 +16,7 @@ const SECRET_PATTERNS = [
 ];
 
 let failures = 0;
-for (const dir of fs.readdirSync(root).sort()) {
+for (const [root, dir] of roots.flatMap((r) => fs.readdirSync(r).sort().map((d) => [r, d]))) {
   const file = path.join(root, dir, "workflow.json");
   if (!fs.existsSync(file)) continue;
   const raw = fs.readFileSync(file, "utf8");
@@ -48,7 +48,7 @@ for (const dir of fs.readdirSync(root).sort()) {
   for (const [re, label] of SECRET_PATTERNS) if (re.test(raw)) problems.push(`possible ${label}`);
 
   failures += problems.length;
-  console.log(`${problems.length ? "FAIL" : "ok  "} ${dir} (${wf.nodes.length} nodes)`);
+  console.log(`${problems.length ? "FAIL" : "ok  "} ${path.basename(root)}/${dir} (${wf.nodes.length} nodes)`);
   for (const p of problems) console.log(`     - ${p}`);
 }
 process.exit(failures ? 1 : 0);

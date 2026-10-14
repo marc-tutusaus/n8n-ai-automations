@@ -11,7 +11,7 @@
 
 > 🔒 **Anonymized.** These are exports of real workflows. Company and client names, hosts, emails, IDs, tokens and credentials were removed. Endpoints are now environment variables and credentials are referenced by name only. The logic and error handling are the ones that ran in production. Some prompts were translated to English and generalized (for example, team names).
 
-## Workflows
+## Production workflows
 
 | # | Workflow | Area | What it does |
 |---|---|---|---|
@@ -25,9 +25,23 @@
 
 Each folder contains `workflow.json` (importable), a `README.md` with the flow diagram and design decisions, and a sample payload.
 
+## Office automations · Microsoft 365 & Google Workspace
+
+Seven more workflows for everyday office work: email, Excel and Sheets, Drive, Teams and the calendar. → **[office-automations/](office-automations)**
+
+| # | Workflow | Ecosystem |
+|---|---|---|
+| 01 | [Outlook invoices → Excel, with the totals checked in code](office-automations/01-outlook-invoices-to-excel) | Microsoft 365 |
+| 02 | [Daily email digest → Teams](office-automations/02-daily-email-digest-teams) | Microsoft 365 |
+| 03 | [Gmail support → AI draft replies + log](office-automations/03-gmail-support-drafts) | Google Workspace |
+| 04 | [Drive documents → classified, renamed and logged in Sheets](office-automations/04-drive-documents-to-sheets) | Google Workspace |
+| 05 | [Weekly KPI report from Sheets](office-automations/05-weekly-kpi-report) | Google Workspace |
+| 06 | [Meeting briefings from Calendar + Gmail history](office-automations/06-meeting-briefings) | Google Workspace |
+| 07 | [Web form → Excel CRM + Outlook welcome + Teams alert](office-automations/07-form-to-crm-welcome) | Microsoft 365 |
+
 ## How I build workflows
 
-- **The AI suggests, a human decides.** LLM output goes to internal notes and drafts. Nothing reaches a customer unreviewed.
+- **The AI suggests, a human decides.** Replies to customers and anything that commits the company go to internal notes and drafts for a person to review. The only email the AI sends directly is the lead welcome (07), and its prompt forbids prices and promises.
 - **Structured outputs.** JSON schemas with `enum`s matching the target system, plus parse fallbacks.
 - **Fail visibly.** Errors are written back where people work (ticket note, Notion status, email), not only in the n8n execution log.
 - **Bounded loops.** Every retry has a counter and a limit.
@@ -40,4 +54,4 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Open http://localhost:5678 → **Workflows → Import from file** → choose any `workflows/*/workflow.json`, then link your credentials.
+Open http://localhost:5678 → **Workflows → Import from file** → choose any `workflows/*/workflow.json` or `office-automations/*/workflow.json`, then link your credentials. The compose file runs n8n 2.43.5.
